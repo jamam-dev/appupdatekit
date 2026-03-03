@@ -223,4 +223,6 @@ internal class UpdateManager(
     private fun log(message: String) {
         if (loggingEnabled) Log.d(TAG, message)
     }
+
+
 }
