@@ -5,6 +5,7 @@
  */
 plugins {
     alias(libs.plugins.android.library)
+    id("maven-publish")
 }
 
 android {
@@ -31,6 +32,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
@@ -56,3 +63,29 @@ dependencies {
     testImplementation(libs.junit)
 }
 
+
+// ─── Maven Publishing (required for JitPack) ──────────────────────────────────
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId    = project.findProperty("GROUP")?.toString()    ?: "com.github.jamam-dev"
+                artifactId = project.findProperty("ARTIFACT_ID")?.toString() ?: "appupdatekit"
+                version    = project.findProperty("VERSION_NAME")?.toString() ?: "1.0.0"
+
+                pom {
+                    name.set("AppUpdateKit")
+                    description.set("Production-grade Android in-app update library controlled via Firebase Remote Config.")
+                    url.set("https://github.com/jamam-dev/AppUpdateKit")
+                    licenses {
+                        license {
+                            name.set("MIT License")
+                            url.set("https://opensource.org/licenses/MIT")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
