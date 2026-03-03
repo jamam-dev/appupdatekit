@@ -17,85 +17,70 @@ import java.lang.ref.WeakReference
 /**
  * **AppUpdateKit** — Production-grade Android in-app update library.
  *
- * Orchestrates Google Play In-App Updates (Flexible & Immediate) controlled via
- * Firebase Remote Config.
+ * Reads update policy from a **single Firebase Remote Config JSON key** (the host app
+ * is responsible for calling `fetchAndActivate()` before invoking this library).
  *
- * ## Usage
+ * Supports:
+ * - **Force update screen** — fully blocking, tries Play IMMEDIATE flow, falls back to Play Store.
+ * - **Maintenance screen** — fully blocking, with "Try Again" button.
+ * - **Flexible update** — Play In-App Update background download via [UpdateFlowHandler].
+ * - **Snooze** — configurable duration and max count (flexible only).
  *
- * ### Verbose (explicit Builder):
+ * ## Usage — Verbose Builder:
  * ```kotlin
  * val kit = AppUpdateKit.with(this)
+ *     .setRemoteConfigKey("auk_update_config")   // optional, this is the default
  *     .setCallback(object : UpdateCallback {
- *         override fun onUpdateAvailable(updateType: UpdateType) { ... }
- *         override fun onUpdateDownloaded() { showSnackbarToInstall() }
- *         override fun onUpdateFailed(exception: Exception) { Log.e(TAG, exception.message, exception) }
+ *         override fun onUpdateDownloaded() { showSnackbar() }
  *     })
+ *     .setForceUpdateScreenConfig(ForceUpdateScreenConfig(buttonColorRes = R.color.accent))
+ *     .setMaintenanceScreenConfig(MaintenanceScreenConfig(illustrationRes = R.drawable.my_icon))
  *     .enableLogging(BuildConfig.DEBUG)
  *     .build()
- *
  * kit.checkForUpdate()
- *
- * // Lifecycle wiring:
- * override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
- *     super.onActivityResult(requestCode, resultCode, data)
- *     kit.onActivityResult(requestCode, resultCode)
- * }
- * override fun onResume() { super.onResume(); kit.onResume() }
- * override fun onDestroy() { super.onDestroy(); kit.onDestroy() }
  * ```
  *
- * ### Shorthand (extension function):
+ * ## Usage — Shorthand:
  * ```kotlin
- * val kit = checkAppUpdate { enableLogging(BuildConfig.DEBUG) }
+ * val kit = checkAppUpdate { setRemoteConfigKey("auk_update_config") }
+ * kit.checkForUpdate()
  * ```
- *
- * @see UpdateCallback
- * @see UpdateType
- * @see com.appupdatekit.extensions.checkAppUpdate
  */
 class AppUpdateKit private constructor(
     activity: Activity,
     private val callback: UpdateCallback,
+    private val remoteConfigKey: String,
     private val fetchTimeoutSeconds: Long,
+    private val forceUpdateScreenConfig: ForceUpdateScreenConfig,
+    private val maintenanceScreenConfig: MaintenanceScreenConfig,
     private val loggingEnabled: Boolean
 ) {
-
-    // ─── Constants ────────────────────────────────────────────────────────────
 
     companion object {
         private const val TAG = "AppUpdateKit"
         private const val DEFAULT_FETCH_TIMEOUT_SECONDS = 10L
 
-        /**
-         * Entry point for the Builder pattern.
-         *
-         * @param activity The host [Activity].
-         * @return A new [Builder] instance.
-         */
+        /** Entry point for the Builder pattern. */
         @JvmStatic
         fun with(activity: Activity): Builder = Builder(activity)
     }
 
-    // ─── Internal state ───────────────────────────────────────────────────────
+    private val activityRef = WeakReference(activity)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private val activityRef: WeakReference<Activity> = WeakReference(activity)
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-
-    private val updateManager: UpdateManager = UpdateManager(
+    private val updateManager = UpdateManager(
         activityRef = activityRef,
         callback = callback,
+        remoteConfigKey = remoteConfigKey,
         fetchTimeoutSeconds = fetchTimeoutSeconds,
+        forceUpdateScreenConfig = forceUpdateScreenConfig,
+        maintenanceScreenConfig = maintenanceScreenConfig,
         loggingEnabled = loggingEnabled
     )
 
     // ─── Public API ───────────────────────────────────────────────────────────
 
-    /**
-     * Initiates the update check flow asynchronously.
-     *
-     * Internally launches a coroutine on [Dispatchers.Main]. The caller does NOT
-     * need to manage the coroutine manually.
-     */
+    /** Starts the update/maintenance check asynchronously. */
     fun checkForUpdate() {
         scope.launch {
             try {
@@ -107,57 +92,23 @@ class AppUpdateKit private constructor(
         }
     }
 
-    /**
-     * Forward this from your [Activity.onActivityResult] override.
-     *
-     * @param requestCode The request code.
-     * @param resultCode  The result code.
-     */
-    fun onActivityResult(requestCode: Int, resultCode: Int) {
+    /** Forward from [Activity.onActivityResult]. */
+    fun onActivityResult(requestCode: Int, resultCode: Int) =
         updateManager.onActivityResult(requestCode, resultCode)
-    }
 
-    /**
-     * Forward this from your [Activity.onResume] override.
-     *
-     * Checks for flexible updates that finished downloading while the app was in
-     * the background and re-triggers [UpdateCallback.onUpdateDownloaded] if needed.
-     */
-    fun onResume() {
-        updateManager.onResume()
-    }
+    /** Forward from [Activity.onResume] — detects pending flexible download. */
+    fun onResume() = updateManager.onResume()
 
-    /**
-     * Completes a downloaded flexible update (triggers the app restart/install).
-     *
-     * Call this after the user confirms installation, for example from a Snackbar
-     * action button. Only relevant for [UpdateType.FLEXIBLE] flows.
-     */
-    fun completeFlexibleUpdate() {
-        updateManager.completeFlexibleUpdate()
-    }
+    /** Completes a downloaded flexible update (triggers restart). */
+    fun completeFlexibleUpdate() = updateManager.completeFlexibleUpdate()
 
-    /**
-     * Records a user snooze action and fires [UpdateCallback.onUpdateSnoozed].
-     *
-     * Call this if your UI has a "Remind me later" / "Not now" option.
-     */
-    fun snooze() {
-        updateManager.recordSnooze()
-    }
+    /** Records a snooze action for flexible updates. */
+    fun snooze() = updateManager.recordSnooze()
 
-    /**
-     * Resets snooze state. Call after a successful update installation.
-     */
-    fun resetSnooze() {
-        updateManager.resetSnooze()
-    }
+    /** Resets snooze state after a successful install. */
+    fun resetSnooze() = updateManager.resetSnooze()
 
-    /**
-     * Releases all resources and cancels internal coroutines.
-     *
-     * **Must** be called from [Activity.onDestroy].
-     */
+    /** Releases all resources. Must be called from [Activity.onDestroy]. */
     fun onDestroy() {
         updateManager.destroy()
         scope.cancel()
@@ -166,55 +117,77 @@ class AppUpdateKit private constructor(
     // ─── Builder ──────────────────────────────────────────────────────────────
 
     /**
-     * Fluent builder for [AppUpdateKit]. Obtain an instance via [AppUpdateKit.with].
-     *
-     * @param activity The host [Activity] from which update flows will be launched.
+     * Fluent builder for [AppUpdateKit].
      */
     class Builder(private val activity: Activity) {
 
-        private var callback: UpdateCallback = object : UpdateCallback {}
-        private var fetchTimeoutSeconds: Long = DEFAULT_FETCH_TIMEOUT_SECONDS
-        private var loggingEnabled: Boolean = false
+        private var callback: UpdateCallback              = object : UpdateCallback {}
+        private var remoteConfigKey: String               = UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY
+        private var fetchTimeoutSeconds: Long             = DEFAULT_FETCH_TIMEOUT_SECONDS
+        private var forceUpdateScreenConfig               = ForceUpdateScreenConfig()
+        private var maintenanceScreenConfig               = MaintenanceScreenConfig()
+        private var loggingEnabled: Boolean               = false
 
         /**
          * Sets the [UpdateCallback] to receive update lifecycle events.
-         * All methods in [UpdateCallback] have default no-op implementations.
          */
         fun setCallback(callback: UpdateCallback): Builder = apply {
             this.callback = callback
         }
 
         /**
-         * Sets the maximum time (in seconds) to wait for a Remote Config fetch.
-         * Defaults to **10 seconds**.
+         * Overrides the Firebase Remote Config key that holds the update JSON blob.
          *
-         * @param seconds Timeout in seconds (minimum 1).
+         * Default: `"auk_update_config"`. The host app must ensure this key is fetched
+         * and activated before calling [AppUpdateKit.checkForUpdate].
+         */
+        fun setRemoteConfigKey(key: String): Builder = apply {
+            this.remoteConfigKey = key.trim()
+        }
+
+        /**
+         * Sets the maximum time (seconds) for any async operations.
+         * Defaults to **10 seconds**.
          */
         fun setFetchTimeoutSeconds(seconds: Long): Builder = apply {
             this.fetchTimeoutSeconds = seconds.coerceAtLeast(1L)
         }
 
         /**
-         * Enables or disables verbose diagnostic logging under the `AppUpdateKit` log tag.
+         * Customizes the appearance of the force update screen.
          *
-         * Defaults to `false`. Strongly recommended to pass `BuildConfig.DEBUG` so
-         * logs are only emitted in debug builds.
+         * @see ForceUpdateScreenConfig
+         */
+        fun setForceUpdateScreenConfig(config: ForceUpdateScreenConfig): Builder = apply {
+            this.forceUpdateScreenConfig = config
+        }
+
+        /**
+         * Customizes the appearance of the maintenance screen.
          *
-         * @param enable `true` to enable logging.
+         * @see MaintenanceScreenConfig
+         */
+        fun setMaintenanceScreenConfig(config: MaintenanceScreenConfig): Builder = apply {
+            this.maintenanceScreenConfig = config
+        }
+
+        /**
+         * Enables verbose diagnostic logging under the `AppUpdateKit` tag.
+         * Pass `BuildConfig.DEBUG` so logs only appear in debug builds.
          */
         fun enableLogging(enable: Boolean): Builder = apply {
             this.loggingEnabled = enable
         }
 
-        /**
-         * Builds and returns an [AppUpdateKit] instance.
-         */
+        /** Builds and returns the [AppUpdateKit] instance. */
         fun build(): AppUpdateKit = AppUpdateKit(
             activity = activity,
             callback = callback,
+            remoteConfigKey = remoteConfigKey,
             fetchTimeoutSeconds = fetchTimeoutSeconds,
+            forceUpdateScreenConfig = forceUpdateScreenConfig,
+            maintenanceScreenConfig = maintenanceScreenConfig,
             loggingEnabled = loggingEnabled
         )
     }
 }
-
