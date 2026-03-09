@@ -2,7 +2,7 @@
  * AppUpdateKit
  * MaintenanceActivity.kt
  * Purpose: Fully blocking screen shown during app maintenance.
- *          "Try Again" re-reads Remote Config; dismisses if maintenance is cleared.
+ *          "Try Again" re-reads config; dismisses if maintenance is cleared.
  */
 package com.appupdatekit
 
@@ -16,13 +16,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.res.ResourcesCompat
 
 /**
- * A fully blocking [AppCompatActivity] shown when Remote Config signals that the app is
- * under maintenance (`maintenance_enabled = true`).
+ * A fully blocking [AppCompatActivity] shown when the app is under maintenance
+ * (`maintenance_enabled = true`).
  *
  * - Back press is disabled.
- * - "Try Again" re-reads the **already-active** Remote Config value and dismisses the
- *   screen if maintenance has been turned off. No new network fetch is performed here —
- *   the host app controls when RC is refreshed.
+ * - "Try Again" re-reads config via the same [UpdateConfigSource] that triggered this
+ *   screen and dismisses if maintenance has been cleared.
  *
  * Started internally by [UpdateManager]. Do **not** start this Activity directly.
  */
@@ -33,30 +32,41 @@ internal class MaintenanceActivity : AppCompatActivity() {
     internal companion object {
         const val TAG = "AppUpdateKit"
 
-        const val EXTRA_MESSAGE          = "auk_extra_mt_message"
-        const val EXTRA_BUTTON_TEXT      = "auk_extra_mt_btn"
-        const val EXTRA_RC_KEY           = "auk_extra_mt_rc_key"
-        const val EXTRA_BG_COLOR         = "auk_extra_mt_bg_color"
-        const val EXTRA_TITLE_COLOR      = "auk_extra_mt_title_color"
-        const val EXTRA_MSG_COLOR        = "auk_extra_mt_msg_color"
-        const val EXTRA_BTN_COLOR        = "auk_extra_mt_btn_color"
-        const val EXTRA_BTN_TEXT_COLOR   = "auk_extra_mt_btn_txt_color"
-        const val EXTRA_ILLUSTRATION_RES = "auk_extra_mt_illustration"
-        const val EXTRA_FONT_RES         = "auk_extra_mt_font"
-        const val EXTRA_LOGGING          = "auk_extra_mt_logging"
+        const val EXTRA_MESSAGE             = "auk_extra_mt_message"
+        const val EXTRA_BUTTON_TEXT         = "auk_extra_mt_btn"
+        const val EXTRA_CONFIG_SOURCE_TYPE  = "auk_extra_mt_src_type"   // "rc" | "json"
+        const val EXTRA_CONFIG_SOURCE_VALUE = "auk_extra_mt_src_value"  // RC key or raw JSON
+        const val EXTRA_BG_COLOR            = "auk_extra_mt_bg_color"
+        const val EXTRA_TITLE_COLOR         = "auk_extra_mt_title_color"
+        const val EXTRA_MSG_COLOR           = "auk_extra_mt_msg_color"
+        const val EXTRA_BTN_COLOR           = "auk_extra_mt_btn_color"
+        const val EXTRA_BTN_TEXT_COLOR      = "auk_extra_mt_btn_txt_color"
+        const val EXTRA_ILLUSTRATION_RES    = "auk_extra_mt_illustration"
+        const val EXTRA_FONT_RES            = "auk_extra_mt_font"
+        const val EXTRA_LOGGING             = "auk_extra_mt_logging"
 
         /** Builds the intent that launches this activity. */
         fun buildIntent(
             activity: android.app.Activity,
             config: UpdateConfig,
             screenConfig: MaintenanceScreenConfig,
-            remoteConfigKey: String,
+            configSource: UpdateConfigSource,
             loggingEnabled: Boolean
         ): Intent = Intent(activity, MaintenanceActivity::class.java).apply {
             putExtra(EXTRA_MESSAGE,     config.maintenanceMessage)
             putExtra(EXTRA_BUTTON_TEXT, screenConfig.tryAgainButtonText ?: "Try Again")
-            putExtra(EXTRA_RC_KEY,      remoteConfigKey)
             putExtra(EXTRA_LOGGING,     loggingEnabled)
+            // Serialise the config source so "Try Again" can re-check correctly.
+            when (configSource) {
+                is UpdateConfigSource.RemoteConfig -> {
+                    putExtra(EXTRA_CONFIG_SOURCE_TYPE,  "rc")
+                    putExtra(EXTRA_CONFIG_SOURCE_VALUE, configSource.key)
+                }
+                is UpdateConfigSource.RawJson -> {
+                    putExtra(EXTRA_CONFIG_SOURCE_TYPE,  "json")
+                    putExtra(EXTRA_CONFIG_SOURCE_VALUE, configSource.json)
+                }
+            }
             screenConfig.backgroundColorRes?.let  { putExtra(EXTRA_BG_COLOR, it) }
             screenConfig.titleColorRes?.let       { putExtra(EXTRA_TITLE_COLOR, it) }
             screenConfig.messageColorRes?.let     { putExtra(EXTRA_MSG_COLOR, it) }
@@ -76,7 +86,7 @@ internal class MaintenanceActivity : AppCompatActivity() {
     private lateinit var btnRetry: Button
 
     private var loggingEnabled = false
-    private var remoteConfigKey = UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY
+    private var configSource: UpdateConfigSource = UpdateConfigSource.RemoteConfig()
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -84,8 +94,15 @@ internal class MaintenanceActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_auk_maintenance)
 
-        loggingEnabled  = intent.getBooleanExtra(EXTRA_LOGGING, false)
-        remoteConfigKey = intent.getStringExtra(EXTRA_RC_KEY) ?: UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY
+        loggingEnabled = intent.getBooleanExtra(EXTRA_LOGGING, false)
+        val srcType  = intent.getStringExtra(EXTRA_CONFIG_SOURCE_TYPE)
+        val srcValue = intent.getStringExtra(EXTRA_CONFIG_SOURCE_VALUE) ?: ""
+        configSource = when (srcType) {
+            "json" -> UpdateConfigSource.RawJson(srcValue)
+            else   -> UpdateConfigSource.RemoteConfig(
+                srcValue.ifBlank { UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY }
+            )
+        }
 
         bindViews()
         applyContent()
@@ -97,7 +114,7 @@ internal class MaintenanceActivity : AppCompatActivity() {
     /** Fully block back press — the user cannot bypass the maintenance screen. */
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        // Intentionally empty — back is disabled on this screen.
+        super.onBackPressed()
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
@@ -139,8 +156,8 @@ internal class MaintenanceActivity : AppCompatActivity() {
         extras.getInt(EXTRA_FONT_RES, 0).takeIf { it != 0 }?.let { fontRes ->
             try {
                 val typeface = ResourcesCompat.getFont(this, fontRes)
-                title.typeface   = typeface
-                message.typeface = typeface
+                title.typeface    = typeface
+                message.typeface  = typeface
                 btnRetry.typeface = typeface
             } catch (e: Exception) {
                 Log.w(TAG, "AppUpdateKit: Could not load font resource $fontRes — ${e.message}")
@@ -149,37 +166,36 @@ internal class MaintenanceActivity : AppCompatActivity() {
     }
 
     /**
-     * Re-reads the already-active Remote Config value.
-     * If [UpdateConfig.maintenanceEnabled] is now `false`, finish this activity
-     * so the user can continue using the app.
+     * Re-reads config from the same [UpdateConfigSource] used to trigger this screen.
+     * If [UpdateConfig.maintenanceEnabled] is now `false`, finish this activity.
      *
-     * No network request is made here — the host app controls Remote Config refresh cycles.
+     * For [UpdateConfigSource.RemoteConfig]: no network request is made here — the host
+     * app controls Remote Config refresh cycles.
+     * For [UpdateConfigSource.RawJson]: re-parses the same JSON (static by definition).
      */
     private fun checkMaintenanceStatus() {
-        log("Try Again tapped — re-reading Remote Config key '$remoteConfigKey'.")
+        log("Try Again tapped — re-reading config from source: $configSource")
         btnRetry.isEnabled = false
         btnRetry.text = "Checking…"
 
-        val parser = UpdateConfigParser(
-            remoteConfigKey = remoteConfigKey,
+        val config = UpdateConfigParser(
+            source = configSource,
             loggingEnabled = loggingEnabled
-        )
-        val config = parser.parse()
+        ).parse()
 
         if (!config.maintenanceEnabled) {
             log("Maintenance cleared — finishing MaintenanceActivity.")
             finish()
         } else {
             log("Maintenance still active.")
-            // Update message in case it changed in RC.
             message.text = config.maintenanceMessage
             btnRetry.isEnabled = true
             btnRetry.text = intent.getStringExtra(EXTRA_BUTTON_TEXT) ?: "Try Again"
         }
     }
 
-    private fun log(message: String) {
-        if (loggingEnabled) Log.d(TAG, message)
+    private fun log(msg: String) {
+        if (loggingEnabled) Log.d(TAG, msg)
     }
 }
 

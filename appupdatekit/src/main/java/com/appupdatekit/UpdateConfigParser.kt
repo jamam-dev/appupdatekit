@@ -11,20 +11,22 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import org.json.JSONObject
 
 /**
- * Reads a single Remote Config key whose value is a JSON string, then maps
+ * Reads the update config JSON from the configured [UpdateConfigSource] and maps
  * it to an [UpdateConfig].
  *
- * The host application is responsible for calling `fetchAndActivate()` **before**
- * passing control to AppUpdateKit. This class only reads the already-activated value.
+ * - [UpdateConfigSource.RemoteConfig] — reads from an already-activated
+ *   [FirebaseRemoteConfig] instance (host app must call `fetchAndActivate()` first).
+ * - [UpdateConfigSource.RawJson] — parses the supplied JSON string directly;
+ *   no Firebase dependency is required in this path.
  *
  * On any parse error the defaults defined in [UpdateConfig.Defaults] are returned
  * so the library degrades gracefully.
  *
- * @param remoteConfigKey  The Remote Config key to read (default: [UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY]).
+ * @param source           Where to read the JSON config from.
  * @param loggingEnabled   Whether to emit diagnostic log messages.
  */
 internal class UpdateConfigParser(
-    private val remoteConfigKey: String = UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY,
+    private val source: UpdateConfigSource = UpdateConfigSource.RemoteConfig(),
     private val loggingEnabled: Boolean = false
 ) {
 
@@ -60,13 +62,22 @@ internal class UpdateConfigParser(
      */
     fun parse(): UpdateConfig {
         return try {
-            val json = FirebaseRemoteConfig.getInstance().getString(remoteConfigKey)
-            if (json.isBlank()) {
-                log("Remote Config key '$remoteConfigKey' is empty — using defaults.")
+            val jsonString = when (val s = source) {
+                is UpdateConfigSource.RemoteConfig -> {
+                    log("Reading update config from Remote Config key '${s.key}'.")
+                    FirebaseRemoteConfig.getInstance().getString(s.key)
+                }
+                is UpdateConfigSource.RawJson -> {
+                    log("Using supplied raw JSON config.")
+                    s.json
+                }
+            }
+            if (jsonString.isBlank()) {
+                log("Update config JSON is empty — using defaults.")
                 return UpdateConfig()
             }
-            log("Parsing config JSON from key '$remoteConfigKey': $json")
-            parseJson(JSONObject(json))
+            log("Parsing config JSON: $jsonString")
+            parseJson(JSONObject(jsonString))
         } catch (e: Exception) {
             Log.w(TAG, "AppUpdateKit: Failed to parse update config JSON — using defaults. Reason: ${e.message}")
             UpdateConfig()

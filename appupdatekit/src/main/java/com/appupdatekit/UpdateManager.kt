@@ -27,7 +27,7 @@ import java.lang.ref.WeakReference
  *
  * @param activityRef          WeakReference to host Activity.
  * @param callback             UpdateCallback to notify.
- * @param remoteConfigKey      The RC key holding the JSON config blob.
+ * @param configSource         Where to read the update config JSON from.
  * @param fetchTimeoutSeconds  Kept for API compatibility (timeout on any async ops).
  * @param forceUpdateScreenConfig  Visual customization for the force update screen.
  * @param maintenanceScreenConfig  Visual customization for the maintenance screen.
@@ -36,7 +36,7 @@ import java.lang.ref.WeakReference
 internal class UpdateManager(
     private val activityRef: WeakReference<Activity>,
     private val callback: UpdateCallback,
-    private val remoteConfigKey: String,
+    private val configSource: UpdateConfigSource,
     private val fetchTimeoutSeconds: Long,
     private val forceUpdateScreenConfig: ForceUpdateScreenConfig,
     private val maintenanceScreenConfig: MaintenanceScreenConfig,
@@ -69,10 +69,10 @@ internal class UpdateManager(
         }
         val ctx = act.applicationContext
 
-        // 1. Parse config from already-active Remote Config.
-        log("Reading update config from RC key '$remoteConfigKey'.")
+        // 1. Parse config from the configured source.
+        log("Reading update config from source: $configSource")
         val config = UpdateConfigParser(
-            remoteConfigKey = remoteConfigKey,
+            source = configSource,
             loggingEnabled = loggingEnabled
         ).parse()
         log("Config: $config")
@@ -92,7 +92,7 @@ internal class UpdateManager(
                     act,
                     config,
                     maintenanceScreenConfig,
-                    remoteConfigKey,
+                    configSource,
                     loggingEnabled
                 )
             )

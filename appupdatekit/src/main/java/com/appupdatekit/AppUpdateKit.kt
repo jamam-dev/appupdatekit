@@ -17,8 +17,11 @@ import java.lang.ref.WeakReference
 /**
  * **AppUpdateKit** — Production-grade Android in-app update library.
  *
- * Reads update policy from a **single Firebase Remote Config JSON key** (the host app
- * is responsible for calling `fetchAndActivate()` before invoking this library).
+ * Reads update policy from either:
+ * - A **Firebase Remote Config JSON key** (default) — the host app is responsible for
+ *   calling `fetchAndActivate()` before invoking this library.
+ * - A **raw JSON string** supplied directly — useful when your app fetches config from
+ *   its own server or any other source.
  *
  * Supports:
  * - **Force update screen** — fully blocking, tries Play IMMEDIATE flow, falls back to Play Store.
@@ -26,30 +29,35 @@ import java.lang.ref.WeakReference
  * - **Flexible update** — Play In-App Update background download via [UpdateFlowHandler].
  * - **Snooze** — configurable duration and max count (flexible only).
  *
- * ## Usage — Verbose Builder:
+ * ## Usage — Remote Config (default):
  * ```kotlin
  * val kit = AppUpdateKit.with(this)
  *     .setRemoteConfigKey("auk_update_config")   // optional, this is the default
  *     .setCallback(object : UpdateCallback {
  *         override fun onUpdateDownloaded() { showSnackbar() }
  *     })
- *     .setForceUpdateScreenConfig(ForceUpdateScreenConfig(buttonColorRes = R.color.accent))
- *     .setMaintenanceScreenConfig(MaintenanceScreenConfig(illustrationRes = R.drawable.my_icon))
- *     .enableLogging(BuildConfig.DEBUG)
  *     .build()
  * kit.checkForUpdate()
  * ```
  *
- * ## Usage — Shorthand:
+ * ## Usage — Raw JSON from your own server:
  * ```kotlin
- * val kit = checkAppUpdate { setRemoteConfigKey("auk_update_config") }
+ * val kit = AppUpdateKit.with(this)
+ *     .setJsonConfig(myServerJson)   // pass the JSON string directly
+ *     .setCallback(object : UpdateCallback {
+ *         override fun onUpdateDownloaded() { showSnackbar() }
+ *     })
+ *     .build()
  * kit.checkForUpdate()
  * ```
+ *
+ * > **Note:** `setRemoteConfigKey` and `setJsonConfig` are mutually exclusive — the last
+ * > call on the builder wins.
  */
 class AppUpdateKit private constructor(
     activity: Activity,
     private val callback: UpdateCallback,
-    private val remoteConfigKey: String,
+    private val configSource: UpdateConfigSource,
     private val fetchTimeoutSeconds: Long,
     private val forceUpdateScreenConfig: ForceUpdateScreenConfig,
     private val maintenanceScreenConfig: MaintenanceScreenConfig,
@@ -71,7 +79,7 @@ class AppUpdateKit private constructor(
     private val updateManager = UpdateManager(
         activityRef = activityRef,
         callback = callback,
-        remoteConfigKey = remoteConfigKey,
+        configSource = configSource,
         fetchTimeoutSeconds = fetchTimeoutSeconds,
         forceUpdateScreenConfig = forceUpdateScreenConfig,
         maintenanceScreenConfig = maintenanceScreenConfig,
@@ -122,7 +130,7 @@ class AppUpdateKit private constructor(
     class Builder(private val activity: Activity) {
 
         private var callback: UpdateCallback              = object : UpdateCallback {}
-        private var remoteConfigKey: String               = UpdateConfig.DEFAULT_REMOTE_CONFIG_KEY
+        private var configSource: UpdateConfigSource      = UpdateConfigSource.RemoteConfig()
         private var fetchTimeoutSeconds: Long             = DEFAULT_FETCH_TIMEOUT_SECONDS
         private var forceUpdateScreenConfig               = ForceUpdateScreenConfig()
         private var maintenanceScreenConfig               = MaintenanceScreenConfig()
@@ -136,13 +144,32 @@ class AppUpdateKit private constructor(
         }
 
         /**
-         * Overrides the Firebase Remote Config key that holds the update JSON blob.
+         * Reads the update policy JSON from a **Firebase Remote Config** key.
          *
-         * Default: `"auk_update_config"`. The host app must ensure this key is fetched
-         * and activated before calling [AppUpdateKit.checkForUpdate].
+         * The host app must call `fetchAndActivate()` before [AppUpdateKit.checkForUpdate].
+         * Default key: `"auk_update_config"`.
+         *
+         * Mutually exclusive with [setJsonConfig] — last call wins.
          */
         fun setRemoteConfigKey(key: String): Builder = apply {
-            this.remoteConfigKey = key.trim()
+            this.configSource = UpdateConfigSource.RemoteConfig(key.trim())
+        }
+
+        /**
+         * Supplies the update policy as a **raw JSON string**.
+         *
+         * Use this when your app fetches config from its own server, a local asset,
+         * or any source other than Firebase Remote Config.
+         *
+         * The JSON must conform to the schema documented in [UpdateConfig].
+         * An empty string falls back to [UpdateConfig.Defaults] gracefully.
+         *
+         * Mutually exclusive with [setRemoteConfigKey] — last call wins.
+         *
+         * @param json The raw JSON string to parse.
+         */
+        fun setJsonConfig(json: String): Builder = apply {
+            this.configSource = UpdateConfigSource.RawJson(json)
         }
 
         /**
@@ -183,7 +210,7 @@ class AppUpdateKit private constructor(
         fun build(): AppUpdateKit = AppUpdateKit(
             activity = activity,
             callback = callback,
-            remoteConfigKey = remoteConfigKey,
+            configSource = configSource,
             fetchTimeoutSeconds = fetchTimeoutSeconds,
             forceUpdateScreenConfig = forceUpdateScreenConfig,
             maintenanceScreenConfig = maintenanceScreenConfig,
