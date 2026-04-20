@@ -55,15 +55,6 @@ dependencies {
 }
 ```
 ---
-
-### How it works
-
-- `jitpack.yml` specifies **JDK 17** and runs `publishReleasePublicationToMavenLocal`.
-- The `maven-publish` block in `appupdatekit/build.gradle.kts` generates the POM + AAR.
-- JitPack finds the artifacts at `~/.m2/repository/com/github/YOUR_USERNAME/appupdatekit/`.
-
----
-
 ## 🔥 Firebase Remote Config Setup
 
 ### 1. Your app owns the fetch cycle
