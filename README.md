@@ -296,16 +296,7 @@ No manual rules needed. `consumer-rules.pro` (bundled in the AAR) automatically 
 - `com.google.firebase.remoteconfig.**`
 - All public AppUpdateKit classes
 
----
 
-## 🏗️ JitPack Distribution
-
-1. Push repo to GitHub.
-2. Tag: `git tag v1.0.0 && git push origin v1.0.0`
-3. Visit `https://jitpack.io/#YOUR_USERNAME/AppUpdateKit` — auto-built on first request.
-4. `jitpack.yml` at repo root ensures JDK 17.
-
----
 
 ## 📄 License
 
