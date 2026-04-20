@@ -51,41 +51,10 @@ dependencyResolutionManagement {
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.YOUR_USERNAME:appupdatekit:1.0.0")
+    implementation("com.github.jamam-dev:appupdatekit:1.0.0")
 }
 ```
-
-Replace `YOUR_USERNAME` with your GitHub username and `1.0.0` with the release tag.
-
 ---
-
-## 🏗️ Publishing to JitPack
-
-### First time setup
-
-1. **Push** the repo to GitHub (public repository).
-2. **Replace** `YOUR_USERNAME` in `gradle.properties` with your real GitHub username:
-   ```properties
-   GROUP=com.github.yourusername
-   ARTIFACT_ID=appupdatekit
-   VERSION_NAME=1.0.0
-   ```
-3. **Create a release tag** and push it:
-   ```bash
-   git add .
-   git commit -m "Release 1.0.0"
-   git tag v1.0.0
-   git push origin main --tags
-   ```
-4. **Trigger JitPack** — visit:
-   ```
-   https://jitpack.io/#YOUR_USERNAME/AppUpdateKit/v1.0.0
-   ```
-   Click **"Get it"** to trigger the first build. JitPack will run:
-   ```bash
-   ./gradlew :appupdatekit:publishReleasePublicationToMavenLocal
-   ```
-5. Once the build shows ✅ green, your library is live.
 
 ### How it works
 
